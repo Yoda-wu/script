@@ -29,8 +29,7 @@
 
 /*
  *  A grammar for Ruby-like language written in ANTLR v4.
- *  You can find compiler into Parrot VM intermediate representation language
- *  (PIR) here: https://github.com/AlexBelov/corundum
+ *  Not support iterator and until statement
  */
 
 grammar ruby;
@@ -42,27 +41,39 @@ expression_list : expression terminator
                 | terminator
                 ;
 
-expression :for_statement 
-           |function_definition
+expression : for_statement 
+           | function_definition
            | function_inline_call
            | require_block
            | if_statement
            | unless_statement
            | rvalue
+           | raise_expression
            | return_statement
            | while_statement
-           | 
            | pir_inline
            | hash_expression
            | class_definition
            | module_definition
+           | begin_expression
+           | end_expression
+           | beigin_rescue_expression
            ;
+
+begin_expression :BEGIN LEFT_BBRACKET crlf statement_body  RIGHT_BBRACKET crlf;
+
+end_expression : END LEFT_BBRACKET crlf statement_body RIGHT_BBRACKET crlf;
+
+beigin_rescue_expression : BEGIN crlf statement_body  (RESCUE crlf statement_body )* (else_token crlf statement_body )? (ENSURE crlf statement_body )?  END ;
 
 global_get : var_name=lvalue op=ASSIGN global_name=id_global;
 
 global_set : global_name=id_global op=ASSIGN result=all_result;
 
 global_result : id_global;
+
+instance_get : instance_name=lvalue op=ASSIGN result=id_instance;
+
 
 instance_set : instance_name=id_instance op=ASSIGN result=all_result;
 
@@ -78,7 +89,7 @@ pir_inline : PIR crlf pir_expression_list END;
 
 pir_expression_list : expression_list;
 
-class_definition : 'class' id_  ( '<'superclass_id = id_ )? CRLF statement_expression_list? CRLF END;
+class_definition : 'class' lvalue  ( '<'superclass_id = lvalue )? CRLF statement_expression_list? CRLF END;
 
 
 
@@ -111,11 +122,15 @@ function_definition_param_id : id_;
 
 return_statement : RETURN all_result;
 
+
+
 function_call : name=function_name LEFT_RBRACKET params=function_call_param_list RIGHT_RBRACKET
               | name=function_name params=function_call_param_list
               | name=function_name LEFT_RBRACKET RIGHT_RBRACKET
               | id_ '.' name=function_name LEFT_RBRACKET (params=function_call_param_list) ? RIGHT_RBRACKET
               | id_ '.' name=function_name (params=function_call_param_list)?
+              | id_ '::' name=function_name LEFT_RBRACKET (params=function_call_param_list) ? RIGHT_RBRACKET
+              | id_ '::' name=function_name (params=function_call_param_list)?
               ;
 
 function_call_param_list : function_call_params;
@@ -174,7 +189,7 @@ cond_expression : comparison_list;
 
 loop_expression : array_definition;
 
-hash_expression :  LEFT_BBRACKET expression op=HASH_OP expression REFT_BBRACKET;
+hash_expression :  LEFT_BBRACKET expression op=HASH_OP expression RIGHT_BBRACKET;
 
 // for_loop_list : for_loop_list COMMA all_assignment
 //               | all_assignment
@@ -185,6 +200,8 @@ statement_body : statement_expression_list;
 statement_expression_list : expression terminator
                           | RETRY terminator
                           | break_expression terminator
+                          | raise_expression terminator
+                          | yield_expression terminator
                           | statement_expression_list expression terminator
                           | statement_expression_list RETRY terminator
                           | statement_expression_list break_expression terminator
@@ -214,7 +231,8 @@ initial_array_assignment : var_id=lvalue op=ASSIGN LEFT_SBRACKET RIGHT_SBRACKET;
 
 array_assignment : arr_def=array_selector op=ASSIGN arr_val=all_result;
 
-array_definition : LEFT_SBRACKET array_definition_elements RIGHT_SBRACKET;
+array_definition : LEFT_SBRACKET array_definition_elements RIGHT_SBRACKET
+                 | array_definition_elements;
 
 array_definition_elements : ( int_result | dynamic_result )
                           | array_definition_elements COMMA ( int_result | dynamic_result )
@@ -238,8 +256,11 @@ dynamic_result : dynamic_result op=( MUL | DIV | MOD ) int_result
                | float_result op=( PLUS | MINUS )  dynamic_result
                | dynamic_result op=( PLUS | MINUS ) dynamic_result
                | LEFT_RBRACKET dynamic_result RIGHT_RBRACKET
+               | map_result
                | dynamic_
                ;
+
+map_result : hash_expression;
 
 dynamic_ : id_
         | function_call_assignment
@@ -286,9 +307,9 @@ comp_var : all_result
          | id_constence
          ;
 
-lvalue : id_
+lvalue : id_constence
        | id_global
-       | id_constence
+       | id_
        ;
 
 rvalue : lvalue
@@ -301,6 +322,8 @@ rvalue : lvalue
 
        | global_set
        | global_get
+       | instance_set
+       | instance_get
        | dynamic_assignment
        | string_assignment
        | float_assignment
@@ -337,6 +360,10 @@ rvalue : lvalue
        ;
 
 break_expression : BREAK;
+
+raise_expression: RAISE lvalue;
+
+yield_expression : YIELD;
 
 literal_t : LITERAL;
 
@@ -385,7 +412,8 @@ END : 'end';
 DEF : 'def';
 RETURN : 'return';
 PIR : 'pir';
-
+RAISE: 'raise';
+ENSURE : 'ensure';
 IF: 'if';
 ELSE : 'else';
 ELSIF : 'elsif';
@@ -396,11 +424,11 @@ BREAK : 'break';
 FOR : 'for';
 THEN : 'then';
 IN : 'in';
-UNTIL : 'until';
 DO : 'do';
-
+RESCUE: 'rescue';
 TRUE : 'true';
 FALSE : 'false';
+YIELD : 'yield';
 
 PLUS : '+';
 MINUS : '-';
@@ -442,7 +470,7 @@ RIGHT_RBRACKET : ')';
 LEFT_SBRACKET : '[';
 RIGHT_SBRACKET : ']';
 LEFT_BBRACKET : '{';
-REFT_BBRACKET : '}';
+RIGHT_BBRACKET : '}';
 NIL : 'nil';
 
 SL_COMMENT : ('#' ~('\r' | '\n')* '\r'? '\n') -> skip;
